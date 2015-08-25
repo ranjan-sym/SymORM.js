@@ -1,12 +1,32 @@
 <html>
 <head><title>Testing ORM</title></head>
 <body>
-<script src="sample_data.js"></script>
-<script src="orm.js"></script>
+
+<div id="container">
+  The React component should appear here. If you are seeing this then make sure
+  react is working properly. JSX transformation doesn't work when you load this
+  html directly from the file system. You need a web server to serve this file.
+
+  <p>
+  Try
+  <pre>
+      python -m SimpleHTTPServer
+  </pre>
+  for a simple HTTP server
+  </p>
+</div>
+
+<script src="test.data.js"></script>
+<script src="../src/symorm.js"></script>
+<script src="../thirdparty/react/react.js"></script>
+<script src="../thirdparty/react/JSXTransformer.js"></script>
 <script>
-  SymORM.loadObject(station);
-  SymORM.loadObject(categories[0]);
-  console.log(SymORM.dump());
+SymORM.loadObject(station);
+SymORM.loadObject(categories[0]);
+
+console.log(SymORM.dump());
 </script>
+
+<script type="text/jsx" src="app.js"></script>
 </body>
 </html>
