@@ -1,0 +1,12 @@
+<html>
+<head><title>Testing ORM</title></head>
+<body>
+<script src="sample_data.js"></script>
+<script src="orm.js"></script>
+<script>
+  SymORM.loadObject(station);
+  SymORM.loadObject(categories[0]);
+  console.log(SymORM.dump());
+</script>
+</body>
+</html>
