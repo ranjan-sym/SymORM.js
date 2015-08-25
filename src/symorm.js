@@ -1,4 +1,6 @@
 /**
+ * The Reactive Model library for using with React.js
+ *
  * Created by ranjan on 8/25/15.
  */
 var SymORM = new function() {
@@ -153,6 +155,8 @@ var SymORM = new function() {
     // de-registration
     event.modelInformation.components[component] = event;
     components[component].push(event);
+
+    event.component.setState(event.modelInformation.data);
   };
 
   /**
@@ -202,6 +206,21 @@ var SymORM = new function() {
 
     // Since we found the difference, we need to accommodate the changes
     accommodate(record, model);
+
+    // let's raise event on the affected models
+    for(var m in affectedModels) {
+      if (affectedModels.hasOwnProperty(m)) {
+        var affectedModel = affectedModels[m];
+        for(var i in affectedModel) {
+          if (affectedModel.hasOwnProperty(i)) {
+            for(var c in database[m].data[i].components) {
+              console.log(components[c]);
+              database[m].data[i].components[c].component.setState(database[m].data[i].data);
+            }
+          }
+        }
+      }
+    }
 
     return affectedModels;
   };
@@ -478,13 +497,13 @@ var SymORM = new function() {
 
   this.Event = function(modelType, id, field) {
     assert(database.hasOwnProperty(modelType), "The model type '" + modelType + "' is not available");
-    assert(database[modelType].hasOwnProperty(id), "The record '" + id + "' is not available in '" + modelType + "' model");
+    assert(database[modelType].data.hasOwnProperty(id), "The record '" + id + "' is not available in '" + modelType + "' model");
     // Let's see if there is this field in the in the model
-    if (!database[modelType][id].data.hasOwnProperty(field)) {
+    if (!database[modelType].data[id].data.hasOwnProperty(field)) {
       console.log("The field '" + field + "' was not found in record '" + id + "' of model '" + modelType + "'");
     }
 
-    this.modelInformation = database[modelType][id];
+    this.modelInformation = database[modelType].data[id];
     this.field = field;
   }
 };
