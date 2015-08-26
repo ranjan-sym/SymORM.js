@@ -1,3 +1,29 @@
+/**
+ * The global singleton instance of the <b>SymORM</b> object. This library
+ * maintains a in-memory database of all the records from different models with
+ * relational hierarchy.
+ *
+ * <p>
+ *   The library is initialized with <b>load()</b> method which accepts either a
+ *   record object or an array of record object. The record object should have
+ *   a property named <em>_type</em> which determines the type of the model
+ *   represented by the record and an <em>id</em> property which determines the
+ *   identity of the record.
+ * </p>
+ * <p>
+ *   The library is updated at runtime with <b>update()</b>, <b>add()</b> and
+ *   <b>remove()</b> methods available on the <b>SymORM</b>. The necessary
+ *   changes on the database hierarchy is maintained and all the corresponding
+ *   listeners are informed about the update.
+ * </p>
+ * <p>
+ *   The application could use <b>listen()</b> method to register a callback
+ *   to listen for any changes made on the database after it has been loaded.
+ *   <br/><em>Note that the callback is called as soon as it is listened for
+ *   initialization purpose</em>
+ *
+ * @type {SymORM}
+ */
 var SymORM = new function() {
 
   var database = { };
@@ -110,7 +136,7 @@ var SymORM = new function() {
   }
 
   // A record is being updated
-  this.onUpdate = function(raw) {
+  this.update = function(raw) {
     var type = raw._type;
     if (!database.hasOwnProperty(type)) {
       console.log("Trying to update a record whose model '" + type + "' is not recognized");
