@@ -1,13 +1,13 @@
 /**
- * The global singleton instance of the <b>SymORM</b> object. This library
+ * The global singleton instance of the <b>{@link SymORM}</b> object. This library
  * maintains a in-memory database of all the records from different models with
  * relational hierarchy.
  *
  * <p>
- *   The library is initialized with <b>load()</b> method which accepts either a
+ *   The library is initialized with <b>{@link SymORM#load()}</b> method which accepts either a
  *   record object or an array of record object. The record object should have
- *   a property named <em>_type</em> which determines the type of the model
- *   represented by the record and an <em>id</em> property which determines the
+ *   a property named <i>_type</i> which determines the type of the model
+ *   represented by the record and an <i>id</i> property which determines the
  *   identity of the record.
  * </p>
  * <p>
@@ -19,20 +19,50 @@
  * <p>
  *   The application could use <b>listen()</b> method to register a callback
  *   to listen for any changes made on the database after it has been loaded.
- *   <br/><em>Note that the callback is called as soon as it is listened for
- *   initialization purpose</em>
- *
+ *   <i>Note that the callback is called as soon as it is listened. This could
+ *   be useful for initialization.</i>
+ * </p>
  * @type {SymORM}
  */
 var SymORM = new function() {
 
+  /* The main storage that holds all the records for all models */
   var database = { };
 
+  /**
+   * <p>
+   * Listen for any change on any record of any model on this in memory
+   * database. An application can listen for three different types of changes
+   * 1. It can listen for changes in an entire model set. The callback is
+   *    invoked whenever a record is added/removed from the model.
+   * 2. Change on a particular record. When one ore more of the fields of a
+   *    record changes, the callback is fired. The parent record are also
+   *    considered to be changed when a child record changes.
+   * 3. Change on a particular field of a particular record. The callback is
+   *    fired only when a particular field of a particular record changes.
+   * </p>
+   *
+   * @param callback The callback function which is invoked when a record
+   *                 changes. The callback gets back the source record or list
+   *                 of record, and the field that has changed, if the
+   *                 application is listening for specific change on a field
+   * @param model The model on which the application is trying to listen. To
+   *              listen on the changes on the list of all records on the model
+   *              omit the next two parameters
+   * @param id The particular record on which the application is trying to
+   *           listen. To listen for the changes on all the fields of the record
+   *           omit the next parameter
+   * @param field The field of the record on which the application is trying to
+   *              listen.
+   *
+   * @returns {Listener} Returns a listener object which could be used for
+   *                     cancelling the listening when it is no longer required.
+   *                     This could help reduce memory leaks.
+   */
   this.listen = function(callback, model, id, field) {
     if (model === undefined) {
-      return;
+      return null;
     }
-
 
     // Check if we are dealing with a valid model
     if (!database.hasOwnProperty(model)) {
@@ -62,6 +92,14 @@ var SymORM = new function() {
     return listener;
   };
 
+  /**
+   * Initialize the database with the starting data set. This dataset is
+   * provided by the application during the startup or the page load.
+   *
+   * @param repo An array of object or a single object to load
+   *
+   * @returns {{}}
+   */
   this.load = function(repo) {
     // TODO The loading is done from the private function doLoad to provide an
     // opportunity to check and avoid for circular references that will
@@ -78,6 +116,7 @@ var SymORM = new function() {
     return database;
   };
 
+  /* Internal method for actually loading the dataset */
   function doLoad(parent, repo) {
     // Get all the objects available in the repo and create a model structure
     var type = repo._type;
@@ -133,9 +172,16 @@ var SymORM = new function() {
     }
 
     return record;
-  }
+  };
 
-  // A record is being updated
+  /**
+   * Method to update the database during runtime. The methods updates the
+   * database with the data that has been fed in and fires event on the
+   * listeners that are listening on the effected row or model.
+   *
+   * @param raw
+   * @returns {boolean}
+   */
   this.update = function(raw) {
     var type = raw._type;
     if (!database.hasOwnProperty(type)) {
@@ -150,7 +196,7 @@ var SymORM = new function() {
       return false;
     }
 
-    doUpdate(model.items[id], raw);
+    return doUpdate(model.items[id], raw);
   };
 
   /**
@@ -215,6 +261,10 @@ var SymORM = new function() {
 
   }
 
+  /*
+     Retrieve the record from the database corresponding to the raw data
+     being provided or create a new record if one doesn't exist.
+   */
   function getRecord(raw) {
     var type = raw._type;
     var id = raw.id;
@@ -233,6 +283,12 @@ var SymORM = new function() {
     return model.items[id];
   }
 
+  /**
+   * The Model object that represents a Model in the database
+   *
+   * @param name
+   * @constructor
+   */
   var Model = function(name) {
     this.name = name;
     this.items = {};
@@ -243,6 +299,11 @@ var SymORM = new function() {
     }
   };
 
+  /**
+   * The Record object that represents a single row in a table in the database.
+   *
+   * @constructor
+   */
   var Record = function() {
     this.state = {};
     this.listeners = [];
