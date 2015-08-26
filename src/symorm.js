@@ -172,7 +172,7 @@ var SymORM = new function() {
     }
 
     return record;
-  };
+  }
 
   /**
    * Method to update the database during runtime. The methods updates the
@@ -346,14 +346,39 @@ var SymORM = new function() {
   };
 };
 
+/**
+ * A mixin for React.js which integrates a React component with the SymORM.
+ * This mixin will make the component listen for changes on a Model or Record
+ * using one or all of the following three properties -
+ *   <b>SymModel</b>, <b>SymRecord</b> and <b>SymField</b>.
+ * if the application needs to listen for addition or removal of a record on
+ * a model, only <b>SymModel</b> property is defined on the component with the
+ * required model type name. *
+ *     <code>&lt;Component SymModel={table} /&gt;</code>.
+ *
+ * If the application needs to listen for a change in a particular record, the
+ * along with the Model, the Record id has to be provided.
+ *     <code>&lt;Component SymModel={table} SymRecord={id} /&gt;</code>
+ *
+ * If the application needs to listen for a change in a particular field of a
+ * record. (Can also be addition and deletion of child record). The name of
+ * the field is provided along with Model and Record id.
+ *     <code>&lt;Component SymModel={table} SymRecord={id} SymField={field} &gt;</code>
+ *
+ * @type React Component Mixin
+ */
 var SymReactMixin = {
+
+  /* Keep track of listener for automatic unhooking when not required */
   listener: null,
 
+  /* The callback called by the ORM */
   updateState: function(source, field) {
     if (source.hasOwnProperty('items')) {
       // Need to convert to an array here
       var items = [];
       for(var o in source.items) {
+        //noinspection JSUnfilteredForInLoop
         items.push(source.items[o]);
       }
       this.setState({ items: items });
