@@ -1,524 +1,316 @@
-/**
- * The Reactive Model library for using with React.js
- *
- * Created by ranjan on 8/25/15.
- */
 var SymORM = new function() {
-  function assert(condition, message) {
-    if (!condition) {
-      throw message || "Assertion failed";
-    }
-  }
 
-  var database = {};
-  var components = {};
+  var database = { };
 
-  this.loadObject = function(modelObject, parentModelsInformation) {
-    var type = modelObject._type;
-    var id = modelObject.id;
-
-    // Since a model object can be of more than a single type (parent child),
-    // we will make a type an array if it is not an array
-    if (! (type instanceof Array)) {
-      type = [type];
+  this.listen = function(callback, model, id, field) {
+    if (model === undefined) {
+      return;
     }
 
-    var model = null;
-    // Check if the given model Object already exists on our database
-    for(var i=0; i<type.length; ++i) {
-      if (!database.hasOwnProperty(type[i])) {
-        database[type[i]] = new ModelInformation(type[i], {});
+
+    // Check if we are dealing with a valid model
+    if (!database.hasOwnProperty(model)) {
+      throw "Model '" + model + "' is not known";
+    }
+
+    // Create a new Listener object
+    var listener = new Listener(callback);
+
+    var modelObj = database[model];
+
+    // Check if the the listening needs to be done on the entire model or just
+    // a particular record or a field of the record
+    if (id !== undefined) {
+      if (!modelObj.items.hasOwnProperty(id)) {
+        throw "Record '" + id + "' is not available in model '" + model + "'";
       }
-      var modelDb = database[type[i]].items;
-
-      if (modelDb.hasOwnProperty(id)) {
-        model = modelDb[id].items;
-      }
+      listener.source = modelObj.items[id];
+      listener.field = field;
+    } else {
+      listener.source = modelObj;
     }
 
-    // if this is a completely new model we need to create a new instance
-    if (model == null) {
-      model = { };
-    }
-
-    // Keep the list of model information, we need this if there are any child
-    // object that needs to be created later
-    var modelInfo = [];
-    var info = null;
-    // Make sure we update the model information on all the parent-child in the database
-    for(var i=0; i<type.length; ++i) {
-      var modelDb = database[type[i]].items;
-      // first create a model database if one is not available
-      if (!modelDb.hasOwnProperty(id)) {
-        info = modelDb[id] = new ModelInformation(type[i], model);
-      } else {
-        info = modelDb[id];
-      }
-
-      // update the list of models
-      modelInfo.push(info);
-
-      // If there are back references to be updated, need to do it here
-      if (parentModelsInformation instanceof Array) {
-        for(var j=0; j<parentModelsInformation.length; ++j) {
-          info.addBackReference(parentModelsInformation[j]);
-        }
-      }
-    }
-
-    // Finally update the model with its properties
-    for(var prop in modelObject) {
-      if (modelObject.hasOwnProperty(prop)) {
-        // Any property name starting with '_' is considered transient and ignored
-        if (prop.indexOf('_') === 0) {
-          continue;
-        }
-
-        var value = modelObject[prop];
-        // The value might be a reference to another model, in which case, we need
-        // to iteratively load the referenced model as well.
-        // first check if the value is an array then object, the sequence is
-        // import as an array is also a object
-        if (value instanceof Array) {
-          // Many references to be set
-          model[prop] = [];
-          for(i=0; i<value.length; ++i) {
-            model[prop].push(this.loadObject(value[i], modelInfo));
-          }
-        } else if (value instanceof Object) {
-          // Looks like we got a reference here, which means we need to load
-          // another object
-          model[prop] = this.loadObject(value, modelInfo);
-        } else {
-          // plain old primitive property
-          model[prop] = value;
-        }
-      }
-    }
-
-    return info;
+    // add the reference to the source for firing event later
+    listener.source.listeners.push(listener);
+    listener.fire();
+    return listener;
   };
 
-  /** Debug method for checking the database */
-  this.dump = function() {
+  this.load = function(repo) {
+    // TODO The loading is done from the private function doLoad to provide an
+    // opportunity to check and avoid for circular references that will
+    // lead the loading to an infinite loop
+
+
+    // we allow repo to be an array of objects as well
+    if (repo instanceof Array) {
+      repo.map(doLoad.bind(null, null));
+    } else {
+      doLoad(null, repo);
+    }
+
     return database;
   };
 
-  /** An internally used Model information. The structure used in the database */
-  function ModelInformation(type, model) {
-    assert(model instanceof Object);
-    this.type = type;
-    this.items = model;        // The database record
-    this.backReferences = []; // Links to parent models that have this model as a child
-    this.components = {};     // The components that need to be informed when anything changes on this model
+  function doLoad(parent, repo) {
+    // Get all the objects available in the repo and create a model structure
+    var type = repo._type;
+    var id = repo.id;
 
-    this.addBackReference = function(modelInformation) {
-      assert(modelInformation instanceof ModelInformation);
-      if (this.backReferences.indexOf(modelInformation) === -1) {
-        this.backReferences.push(modelInformation);
+    var models;
+    if (type instanceof Array) {
+      // get the model, creating one if one doesn't exist
+      models = type.map( function(c) {
+        return database.hasOwnProperty(c) ? database[c] : (database[c] = new Model(c))
+      });
+    } else {
+      models = [ database.hasOwnProperty(type) ? database[type] : (database[type] = new Model(type)) ];
+    }
+
+    // get the record, creating one if one doesn't exist
+    var record = null;
+    for(var i=0; i<models.length; ++i) {
+      if (models[i].items.hasOwnProperty(id)) {
+        record = models[i].items[id];
+        break;
       }
     }
-  }
-
-  /**
-   * Retrieve the internal id used by react component. This id could be used as
-   * key in objects for storing components
-   *
-   * @param component
-   * @returns {*}
-   */
-  function hashComponent(component) {
-    return component._reactInternalInstance._rootNodeID;
-  }
-
-  /**
-   * Register a React component with the ORM for callbacks
-   *
-   * @param component
-   * @param event
-   */
-  this.registerReactComponent = function(component, event) {
-    event.component = component;
-    component = hashComponent(component);
-    if (!components.hasOwnProperty(component)) {
-      components[component] = [];
+    if (record == null) {
+      record = new Record();
     }
 
-    // Let's see if this event has already been registered
-    if (event.modelInformation.components.hasOwnProperty(component)) {
-      // Repeat registering on the same event, not allowed
-      console.log("Trying to register event on an existing component. Not Allowed.");
-      return;
+    // Update the parent field
+    if (parent !== null && record.parents.indexOf(parent) == -1) {
+      record.parents.push(parent);
     }
 
-    // Register the event, keep a reference in the global array for
-    // de-registration
-    event.modelInformation.components[component] = event;
-    components[component].push(event);
+    // Let's make sure all the models point to the same record
+    models.map( function(c) { return (c.items[id] = record) } );
 
-    if (event.isList) {
+    // Time to update the record
+    for(var prop in repo) {
+      // Ignore all properties that begin with '_'
+      if (!repo.hasOwnProperty(prop) || prop.indexOf('_') == 0)
+        continue;
+
+      var value = repo[prop];
+      if (value instanceof Array) {
+        // A has many relationship, load the child models with their parent as current record
+        record.state[prop] = value.map(doLoad.bind(null, record));
+      } else if (value instanceof Object) {
+        // A belongs to relationship, load the child model with its parent as current record
+        record.state[prop] = doLoad(record, value);
+      } else {
+        // An ordinary attribute, just set it
+        record.state[prop] = value;
+      }
+    }
+
+    return record;
+  }
+
+  // A record is being updated
+  this.onUpdate = function(raw) {
+    var type = raw._type;
+    if (!database.hasOwnProperty(type)) {
+      console.log("Trying to update a record whose model '" + type + "' is not recognized");
+      return false;
+    }
+
+    var model = database[type];
+    var id = raw.id;
+    if (!model.items.hasOwnProperty(id)) {
+      console.log("Trying to update a record of model '" + type + "' with non-existent id '" + id + "'");
+      return false;
+    }
+
+    doUpdate(model.items[id], raw);
+  };
+
+  /**
+   * A method that updates the database with the new record and events on the
+   * listeners.
+   * @param record
+   * @param raw
+   * @return boolean {@code true} if there was an update otherwise {@code false}
+   */
+  function doUpdate(record, raw) {
+    // Flag to find out if the model was actually changed or not
+    var changed = false;
+
+    for(var prop in raw) {
+      if (!raw.hasOwnProperty(prop) || prop.indexOf('_') == 0) {
+        continue;
+      }
+
+      if (raw[prop] instanceof Array) {
+        // This is a tough one, need to check each and every record in both
+        // the source and target, find out if we have any changes in the child
+        // in which case throw the change event
+        // we only see if any new child has been added, removal of a child
+        // has to be dealt separately
+        // we will ignore this, we are only interested in changes in the record
+        // addition and removal are handled by onAddition and onRemoval
+      } else if (raw[prop] instanceof Object) {
+        // First make sure if we are talking about the same record or not
+        if (! record.state.hasOwnProperty(prop) || record.state[prop].state.id != raw[prop].id) {
+          // the object itself has changed, so we got to update with the new
+          // record
+          record.change(prop, getRecord(raw[prop]));
+          changed = true;
+        } else {
+          if (doUpdate(record.state[prop], raw[prop])) {
+            record.fire(prop);
+            changed = true;
+          }
+        }
+      } else {
+
+        if ( (!record.state.hasOwnProperty(prop) && raw[prop] != null)
+                || record.state[prop] != raw[prop]) {
+          // If we didn't have this property before then we consider it changed
+          // or if the value has actually changed
+          record.change(prop, raw[prop]);
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      // the model itself has changed
+      record.fire();
+
+      // Go through all the parents and tell them that since its child has
+      // changed, it also has changed
+      record.parents.map(function(r) { r.fire(); });
+    }
+
+    return changed;
+
+  }
+
+  function getRecord(raw) {
+    var type = raw._type;
+    var id = raw.id;
+    if (!database.hasOwnProperty(type)) {
+      return null;
+    }
+
+    var model = database[type];
+    if (!model.items.hasOwnProperty(id)) {
+      model.items[id] = new Record();
+
+      model.fire();
+    }
+
+    doUpdate(model.items[id], raw);
+    return model.items[id];
+  }
+
+  var Model = function(name) {
+    this.name = name;
+    this.items = {};
+    this.listeners = [];
+
+    this.fire = function() {
+      this.listeners.map(function(l) { l.fire(); });
+    }
+  };
+
+  var Record = function() {
+    this.state = {};
+    this.listeners = [];
+    this.parents = [];
+
+    this.change = function(field, newValue) {
+      this.state[field] = newValue;
+      // And then fire the specific field based event
+      this.fire(field);
+    };
+
+    this.fire = function(field) {
+      this.listeners.map(function(l) {
+        if (l.field === field)
+          l.fire();
+      });
+    };
+  };
+
+
+  var Listener = function(callback) {
+    // Keep track of the callback
+    this.callback = callback;
+    this.source = null;
+    this.field = null;
+
+    /**
+     * Cancel this listener
+     */
+    this.cancel = function() {
+      var idx = this.source.listeners.indexOf(this);
+      if (idx >= 0) {
+        this.source.listeners.splice(idx, 1);
+      }
+    };
+
+    this.fire = function() {
+      this.callback(this.source, this.field);
+    };
+  };
+};
+
+var SymReactMixin = {
+  listener: null,
+
+  updateState: function(source, field) {
+    if (source.hasOwnProperty('items')) {
+      // Need to convert to an array here
       var items = [];
-      for (var i in event.modelInformation.items) {
-        items.push(event.modelInformation.items[i].items);
+      for(var o in source.items) {
+        items.push(source.items[o]);
       }
-      event.component.setState({ _items: items });
-    } else {
-      event.component.setState(event.modelInformation.items);
-    }
-  };
-
-  /**
-   * Unregister the React component after which no callbacks would be thrown
-   * to the component from the ORM
-   *
-   * @param component
-   */
-  this.unregisterReactComponent = function(component) {
-    component = hashComponent(component);
-    // only need to do this if the component is already registered
-    if (components.hasOwnProperty(component)) {
-      // remove the reference from all the model that is listening for this component
-      for(var i=0; i<components[component].length; ++i) {
-        var event = components[component][i];
-        delete event.modelInformation.components[component];
-      }
-
-      // and also clear it from the global list
-      delete(components[component]);
-    }
-  };
-
-  var affectedModels = {};
-  var componentsToTrigger = [];
-
-  this.onUpdate = function(model) {
-    // We got an object that needs to be updated on the system
-    var type = model._type;
-    var id = model.id;
-
-    // Let's see if we know this type of model
-    if(!database.hasOwnProperty(type)) {
-      console.log("Ignoring an update event for unknown model '" + type + "'");
-      return;
-    }
-
-    // Check if this is a known id
-    if (!database[type].items.hasOwnProperty(id)) {
-      console.log("Ignoring update event on model '" + type + "' for non existent id - " + id);
-      return;
-    }
-
-    var record = database[type].items[id];
-    // Time to find out the components that need to be triggered
-    affectedModels = {};
-
-    // Since we found the difference, we need to accommodate the changes
-    accommodate(record, model);
-
-    // let's raise event on the affected models
-    for(var m in affectedModels) {
-      if (affectedModels.hasOwnProperty(m)) {
-        var affectedModel = affectedModels[m];
-        for(var i in affectedModel) {
-          if (affectedModel.hasOwnProperty(i)) {
-            for(var c in database[m].items[i].components) {
-              console.log(components[c]);
-              database[m].items[i].components[c].component.setState(database[m].items[i].items);
-            }
-          }
-        }
-      }
-    }
-
-    return affectedModels;
-  };
-
-  /**
-   * Check if the given source and target field values are different or not.
-   * This method checks deep into the source to find out if the source and
-   * target is different. It returns as soon as it can figure out that the
-   * two are different
-   *
-   * @param source
-   * @param target
-   */
-  function isDifferent(source, target) {
-    // Let's see what is the kind of the value that we are trying to check here
-    if (source instanceof Array) {
-      if (!(target instanceof Array)) {
-        return true;
-      }
-      // Both are array, so we need to check into both of them now
-      if (source.length != target.length) {
-        return true;
-      }
-
-      for(var i=0; i<source.length; ++i) {
-        if (isDifferent(source[i], target[i])) {
-          return true;
-        }
-      }
-    } else if (source instanceof Object) {
-      assert(target instanceof ModelInformation, "Invalid State of Model Database");
-      for(var prop in source) {
-        if (source.hasOwnProperty(prop)) {
-          if (!target.items.hasOwnProperty(prop)) {
-            return true;
-          } else {
-            return isDifferent(source[prop], target.items[prop]);
-          }
-        }
+      this.setState({ items: items });
+    } else if (field) {
+      if (source.state[field] instanceof Array) {
+        this.setState({items: source.state[field]});
+      } else if (source.state[field] instanceof Object) {
+        this.setState(source.state[field].state);
+      } else {
+        this.setState( { value: source.state[field]} );
       }
     } else {
-      return source != target;
+      this.setState( source.state );
     }
-  }
+  },
 
-  function accommodate(targetObj, source) {
-    // update the target with the source and while doing so, also update
-    // the components and affected models
-    var changedProperties = [];
+  componentWillMount: function() {
+    if (this.listener) {
+      this.listener.cancel();
+    }
 
-    for(var prop in source) {
-      var propChanged = false;
+    // Check if we have the required properties
+    if (this.props.hasOwnProperty('SymModel')) {
+      var model = this.props.SymModel;
 
-      if (source.hasOwnProperty(prop)) {
-        if (prop.indexOf('_') == 0) {
-          continue;
-        }
-
-        if (source[prop] instanceof Array) {
-          if (!targetObj.items.hasOwnProperty(prop)) {
-            targetObj.items[prop] = [];
-          }
-
-          // Let's do the addition and subtraction of child models
-          var targetToRemove = [];
-          for(var i=0; i<targetObj.items[prop].length; ++i) {
-            var found = false;
-            for(var j=0; j<source[prop].length; ++i) {
-              if(targetObj.items[prop][i].items.id == source[prop][j].id) {
-                if (accommodate(targetObj.items[prop][i], source[prop][j])) {
-                  propChanged = true;
-                }
-                delete source[prop][j];
-                found = true;
-                break;
-              }
-            }
-            if (!found) {
-              propChanged = true;
-              targetToRemove.push(i);
-            }
-          }
-
-          // remove the members that were not available in the source
-          // Notice the iteration using opposite direction, to make sure delete works properly
-          for(i=targetToRemove.length-1; i>=0; --i) {
-            targetObj.items[prop][targetToRemove[i]].removeBackReference(targetObj);
-            delete targetObj.items[prop][targetToRemove[i]];
-          }
-
-          // Add all the members that are still there in the source
-          var len = targetObj.items[prop].length;
-          for(i=0; i<source[prop].length; ++i) {
-            propChanged = true;
-            targetObj.items[prop][len] = getModelInformation(source[prop][i]._type, source[prop][i].id);
-            accommodate(targetObj.items[prop][len], source[prop][i]);
-          }
-        } else if (source[prop] instanceof Object) {
-          // When comparing for an object we need to check if the object has changed
-          if (!targetObj.items.hasOwnProperty(prop)
-                  || targetObj.items[prop].id != source[prop].id) {
-            if (targetObj.items.hasOwnProperty(prop)) {
-              targetObj.items[prop].removeBackReference(targetObj);
-            }
-            propChanged = true;
-            targetObj.items[prop] = getModelInformation(source[prop]._type, source[prop].id);
-            targetObj.items[prop].addBackReference(targetObj);
-          }
-          if (accommodate(targetObj.items[prop], source[prop])) {
-            propChanged = true;
-          }
-        } else if (source[prop] === null && targetObj.items.hasOwnProperty(prop)) {
-          // null has to be handled a bit differently since there might be an
-          // object that needs to be cleared on the target. Note that arrays
-          // should not be declared null in the source but should rather be
-          // empty array []
-          if (targetObj.items[prop] instanceof ModelInformation) {
-            targetObj.items[prop].removeBackReference(targetObj);
-            delete targetObj.items[prop];
-          }
+      if (this.props.hasOwnProperty('SymRecord')) {
+        var id = this.props.SymRecord;
+        if (this.props.hasOwnProperty('SymField')) {
+          var field = this.props.SymField;
+          this.listener = SymORM.listen(this.updateState, model, id, field);
         } else {
-          if (targetObj.items[prop] != source[prop]) {
-            propChanged = true;
-            targetObj.items[prop] = source[prop];
-          }
+          this.listener = SymORM.listen(this.updateState, model, id);
         }
-
-        if (propChanged) {
-          changedProperties.push(prop);
-        }
+      } else {
+        this.listener = SymORM.listen(this.updateState, model);
       }
     }
+  },
 
-    // Let's see what properties have changed and based on that, populate the
-    // events array
-    for(i=0;i<changedProperties.length; ++i) {
-      if (!affectedModels.hasOwnProperty(targetObj.type)) {
-        affectedModels[targetObj.type] = {};
-      }
-
-      if (!affectedModels[targetObj.type].hasOwnProperty(source.id)) {
-        affectedModels[targetObj.type][source.id] = [];
-      }
-
-      affectedModels[targetObj.type][source.id].push(changedProperties[i]);
-    }
-
-    // If the accommodation has changed this model by anyway, return true
-    return changedProperties.length > 0;
-  }
-
-  /**
-   * Retrieve an existing model from the database, but if one is not found
-   * then create a new model information, and also update the affectedModels
-   * while doing so
-   * @param modelType
-   * @param id
-   */
-  function getModelInformation(modelType, id) {
-    var res;
-    if (!database.items[modelType].hasOwnProperty(id)) {
-      res = database.items[modelType][id] = new ModelInformation(modelType, { });
-      // Also update the affectedModels information, this information updates
-      // the root level notification
-      if (!affectedModels.hasOwnProperty(modelType)) {
-        affectedModels[modelType] = {};
-      }
-      affectedModels[modelType][0] = "root";
-    } else {
-      res = database.items[modelType][id];
-    }
-
-    return res;
-  }
-
-  function updateModel(model) {
-    var modelData = data[model._type][model.id];
-
-    // if the model is not available in the container, create a new model
-    if (modelData == undefined) {
-      modelData = data[model._type][model.id] = {};
-    }
-
-    // update all the properties of our model in the container
-    for(var p in model) {
-      if (model.hasOwnProperty(p)) {
-        if (p.indexOf('_') === 0) {
-          // do not update transient properties that are prefixed with '_'
-          continue;
-        }
-
-        // in case we find an object here, we need to do a recursive update
-        // check if the following feature is needed -> *** throwing addition
-        // or removal event as and when required, but after the update event
-        // is thrown ***
-        if (typeof model[p] == 'object') {
-          modelData[p] = {
-            _type: model[p]._type,
-            _ref: model[p].id
-          }
-        } else if (model[p] instanceof Array) {
-          var type = modelData[p][_type];
-          var originalRefs = modelData[p][_ref];
-          // The original References are stored for making out changes and a
-          // new Array is created for updating the references
-          modelData[p][_ref] = [];
-          for(var i=0; i<model[p].length; ++i) {
-            type = model[p][i]._type;
-            modelData[p][_ref].push(model[p][i].id);
-          }
-          modelData[p][_type] = type;
-        } else {
-          modelData[p] = model[p];
-        }
-      }
+  componentWillUnmount: function() {
+    if (this.listener) {
+      this.listener.cancel();
+      this.listener = undefined;
     }
   }
 
-  //this.onUpdate = function(model) {
-  //  var m = data[model._type][model.id];
-  //  if (m != undefined) {
-  //    var components = m.__components;
-  //    updateModel(model);
-  //    for(i in components) {
-  //      if (components.hasOwnProperty(i)) {
-  //        components.setState(m);
-  //      }
-  //    }
-  //  }
-  //};
-
-  /**
-   * The event called when a new model is inserted in the database (in which
-   * case the <b>parentRef</b> is {@code null}) or when a model becomes a part
-   * of a parent model.
-   *
-   * @param model The model which has been added
-   * @param parentRef The parentRef which is {@code null} if a model is being
-   *                  added to a root otherwise a reference to the parent model
-   *                  to which the model has been added
-   */
-  this.onAddition = function(model, parentRef) {
-    // Let's see if we already have the given model
-    var existing = data[model._type][model.id] != undefined;
-    if (parentRef == null && existing) {
-      // this is an update and not a insert
-      this.onUpdate(model);
-      return;
-    }
-
-    // Update the model repo
-    updateModel(model);
-
-    if (parentRef != null) {
-      // An insert event is provided to the listener on the parent model
-      var parent = data[parentRef.model][parentRef.id];
-      if (parent != null) {
-        var components = parent[parentRef.ref].__components;
-        for(var i=0; i<components.length; ++i) {
-          var items = components[i].state._items.concat();
-          parent[parentRef.ref].__components[i].setState({_items: items});
-        }
-      }
-    } else {
-      // TODO This may hit the global listener
-    }
-  };
-
-  this.onRemoval = function(model, parentRef) {
-    if (parentRef == null) {
-
-    }
-  }
-
-  this.Event = function(modelType, id, field) {
-    assert(database.hasOwnProperty(modelType), "The model type '" + modelType + "' is not available");
-    if (id == 0) {
-      this.modelInformation = database[modelType];
-      this.isList = true;
-      this.field = null;
-    } else {
-      assert(database[modelType].items.hasOwnProperty(id), "The record '" + id + "' is not available in '" + modelType + "' model");
-      // Let's see if there is this field in the in the model
-      if (!database[modelType].items[id].items.hasOwnProperty(field)) {
-        console.log("The field '" + field + "' was not found in record '" + id + "' of model '" + modelType + "'");
-      }
-      this.modelInformation = database[modelType].items[id];
-      this.field = field;
-      this.isList = database[modelType].items[id][field] instanceof Array;
-    }
-
-  }
 };
