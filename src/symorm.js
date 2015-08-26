@@ -29,10 +29,10 @@ var SymORM = new function() {
       if (!database.hasOwnProperty(type[i])) {
         database[type[i]] = new ModelInformation(type[i], {});
       }
-      var modelDb = database[type[i]].data;
+      var modelDb = database[type[i]].items;
 
       if (modelDb.hasOwnProperty(id)) {
-        model = modelDb[id].data;
+        model = modelDb[id].items;
       }
     }
 
@@ -47,7 +47,7 @@ var SymORM = new function() {
     var info = null;
     // Make sure we update the model information on all the parent-child in the database
     for(var i=0; i<type.length; ++i) {
-      var modelDb = database[type[i]].data;
+      var modelDb = database[type[i]].items;
       // first create a model database if one is not available
       if (!modelDb.hasOwnProperty(id)) {
         info = modelDb[id] = new ModelInformation(type[i], model);
@@ -108,7 +108,7 @@ var SymORM = new function() {
   function ModelInformation(type, model) {
     assert(model instanceof Object);
     this.type = type;
-    this.data = model;        // The database record
+    this.items = model;        // The database record
     this.backReferences = []; // Links to parent models that have this model as a child
     this.components = {};     // The components that need to be informed when anything changes on this model
 
@@ -156,7 +156,15 @@ var SymORM = new function() {
     event.modelInformation.components[component] = event;
     components[component].push(event);
 
-    event.component.setState(event.modelInformation.data);
+    if (event.isList) {
+      var items = [];
+      for (var i in event.modelInformation.items) {
+        items.push(event.modelInformation.items[i].items);
+      }
+      event.component.setState({ _items: items });
+    } else {
+      event.component.setState(event.modelInformation.items);
+    }
   };
 
   /**
@@ -195,12 +203,12 @@ var SymORM = new function() {
     }
 
     // Check if this is a known id
-    if (!database[type].data.hasOwnProperty(id)) {
+    if (!database[type].items.hasOwnProperty(id)) {
       console.log("Ignoring update event on model '" + type + "' for non existent id - " + id);
       return;
     }
 
-    var record = database[type].data[id];
+    var record = database[type].items[id];
     // Time to find out the components that need to be triggered
     affectedModels = {};
 
@@ -213,9 +221,9 @@ var SymORM = new function() {
         var affectedModel = affectedModels[m];
         for(var i in affectedModel) {
           if (affectedModel.hasOwnProperty(i)) {
-            for(var c in database[m].data[i].components) {
+            for(var c in database[m].items[i].components) {
               console.log(components[c]);
-              database[m].data[i].components[c].component.setState(database[m].data[i].data);
+              database[m].items[i].components[c].component.setState(database[m].items[i].items);
             }
           }
         }
@@ -254,10 +262,10 @@ var SymORM = new function() {
       assert(target instanceof ModelInformation, "Invalid State of Model Database");
       for(var prop in source) {
         if (source.hasOwnProperty(prop)) {
-          if (!target.data.hasOwnProperty(prop)) {
+          if (!target.items.hasOwnProperty(prop)) {
             return true;
           } else {
-            return isDifferent(source[prop], target.data[prop]);
+            return isDifferent(source[prop], target.items[prop]);
           }
         }
       }
@@ -280,17 +288,17 @@ var SymORM = new function() {
         }
 
         if (source[prop] instanceof Array) {
-          if (!targetObj.data.hasOwnProperty(prop)) {
-            targetObj.data[prop] = [];
+          if (!targetObj.items.hasOwnProperty(prop)) {
+            targetObj.items[prop] = [];
           }
 
           // Let's do the addition and subtraction of child models
           var targetToRemove = [];
-          for(var i=0; i<targetObj.data[prop].length; ++i) {
+          for(var i=0; i<targetObj.items[prop].length; ++i) {
             var found = false;
             for(var j=0; j<source[prop].length; ++i) {
-              if(targetObj.data[prop][i].data.id == source[prop][j].id) {
-                if (accommodate(targetObj.data[prop][i], source[prop][j])) {
+              if(targetObj.items[prop][i].items.id == source[prop][j].id) {
+                if (accommodate(targetObj.items[prop][i], source[prop][j])) {
                   propChanged = true;
                 }
                 delete source[prop][j];
@@ -307,44 +315,44 @@ var SymORM = new function() {
           // remove the members that were not available in the source
           // Notice the iteration using opposite direction, to make sure delete works properly
           for(i=targetToRemove.length-1; i>=0; --i) {
-            targetObj.data[prop][targetToRemove[i]].removeBackReference(targetObj);
-            delete targetObj.data[prop][targetToRemove[i]];
+            targetObj.items[prop][targetToRemove[i]].removeBackReference(targetObj);
+            delete targetObj.items[prop][targetToRemove[i]];
           }
 
           // Add all the members that are still there in the source
-          var len = targetObj.data[prop].length;
+          var len = targetObj.items[prop].length;
           for(i=0; i<source[prop].length; ++i) {
             propChanged = true;
-            targetObj.data[prop][len] = getModelInformation(source[prop][i]._type, source[prop][i].id);
-            accommodate(targetObj.data[prop][len], source[prop][i]);
+            targetObj.items[prop][len] = getModelInformation(source[prop][i]._type, source[prop][i].id);
+            accommodate(targetObj.items[prop][len], source[prop][i]);
           }
         } else if (source[prop] instanceof Object) {
           // When comparing for an object we need to check if the object has changed
-          if (!targetObj.data.hasOwnProperty(prop)
-                  || targetObj.data[prop].id != source[prop].id) {
-            if (targetObj.data.hasOwnProperty(prop)) {
-              targetObj.data[prop].removeBackReference(targetObj);
+          if (!targetObj.items.hasOwnProperty(prop)
+                  || targetObj.items[prop].id != source[prop].id) {
+            if (targetObj.items.hasOwnProperty(prop)) {
+              targetObj.items[prop].removeBackReference(targetObj);
             }
             propChanged = true;
-            targetObj.data[prop] = getModelInformation(source[prop]._type, source[prop].id);
-            targetObj.data[prop].addBackReference(targetObj);
+            targetObj.items[prop] = getModelInformation(source[prop]._type, source[prop].id);
+            targetObj.items[prop].addBackReference(targetObj);
           }
-          if (accommodate(targetObj.data[prop], source[prop])) {
+          if (accommodate(targetObj.items[prop], source[prop])) {
             propChanged = true;
           }
-        } else if (source[prop] === null && targetObj.data.hasOwnProperty(prop)) {
+        } else if (source[prop] === null && targetObj.items.hasOwnProperty(prop)) {
           // null has to be handled a bit differently since there might be an
           // object that needs to be cleared on the target. Note that arrays
           // should not be declared null in the source but should rather be
           // empty array []
-          if (targetObj.data[prop] instanceof ModelInformation) {
-            targetObj.data[prop].removeBackReference(targetObj);
-            delete targetObj.data[prop];
+          if (targetObj.items[prop] instanceof ModelInformation) {
+            targetObj.items[prop].removeBackReference(targetObj);
+            delete targetObj.items[prop];
           }
         } else {
-          if (targetObj.data[prop] != source[prop]) {
+          if (targetObj.items[prop] != source[prop]) {
             propChanged = true;
-            targetObj.data[prop] = source[prop];
+            targetObj.items[prop] = source[prop];
           }
         }
 
@@ -381,8 +389,8 @@ var SymORM = new function() {
    */
   function getModelInformation(modelType, id) {
     var res;
-    if (!database.data[modelType].hasOwnProperty(id)) {
-      res = database.data[modelType][id] = new ModelInformation(modelType, { });
+    if (!database.items[modelType].hasOwnProperty(id)) {
+      res = database.items[modelType][id] = new ModelInformation(modelType, { });
       // Also update the affectedModels information, this information updates
       // the root level notification
       if (!affectedModels.hasOwnProperty(modelType)) {
@@ -390,7 +398,7 @@ var SymORM = new function() {
       }
       affectedModels[modelType][0] = "root";
     } else {
-      res = database.data[modelType][id];
+      res = database.items[modelType][id];
     }
 
     return res;
@@ -497,13 +505,20 @@ var SymORM = new function() {
 
   this.Event = function(modelType, id, field) {
     assert(database.hasOwnProperty(modelType), "The model type '" + modelType + "' is not available");
-    assert(database[modelType].data.hasOwnProperty(id), "The record '" + id + "' is not available in '" + modelType + "' model");
-    // Let's see if there is this field in the in the model
-    if (!database[modelType].data[id].data.hasOwnProperty(field)) {
-      console.log("The field '" + field + "' was not found in record '" + id + "' of model '" + modelType + "'");
+    if (id == 0) {
+      this.modelInformation = database[modelType];
+      this.isList = true;
+      this.field = null;
+    } else {
+      assert(database[modelType].items.hasOwnProperty(id), "The record '" + id + "' is not available in '" + modelType + "' model");
+      // Let's see if there is this field in the in the model
+      if (!database[modelType].items[id].items.hasOwnProperty(field)) {
+        console.log("The field '" + field + "' was not found in record '" + id + "' of model '" + modelType + "'");
+      }
+      this.modelInformation = database[modelType].items[id];
+      this.field = field;
+      this.isList = database[modelType].items[id][field] instanceof Array;
     }
 
-    this.modelInformation = database[modelType].data[id];
-    this.field = field;
   }
 };
